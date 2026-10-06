@@ -88,11 +88,110 @@ def check_exam_eligibility_tool(student_id: str, course_code: str, as_of_date: s
     return {
         "status": "success",
         "result": decision,
+        "course_code": course_code,
         "classes_held": att_res["classes_held"],
         "classes_attended": att_res["classes_attended"],
         "attendance_pct": pct,
         "applied_rules": applied_rules,
         "explanation": explanation
+    }
+
+def get_all_student_attendance_tool(student_id: str, as_of_date: str = "2026-10-06") -> Dict[str, Any]:
+    """
+    Computes attendance and exam eligibility across ALL enrolled courses for a student.
+    Ensures that queries like 'what is my attendance' work seamlessly for any student.
+    """
+    records = get_student_attendance(student_id)
+    if not records:
+        return {
+            "status": "error",
+            "message": f"No attendance records found for student {student_id}."
+        }
+        
+    courses_summary = []
+    overall_eligible = True
+    
+    # Read min attendance rule
+    min_att_rules = get_rules_by_parameter("min_attendance_pct")
+    rule = min_att_rules[0] if min_att_rules else {
+        "rule_id": "ATT-MIN-01",
+        "value": "75%",
+        "source_doc_id": "ACAD-REG-2024",
+        "source_section": "Clause 11.2"
+    }
+    
+    applied_rules = [{
+        "rule_id": rule["rule_id"],
+        "value": rule["value"],
+        "source_doc_id": rule["source_doc_id"],
+        "section": rule["source_section"]
+    }]
+    
+    lines = []
+    for rec in records:
+        cc = rec["course_code"]
+        name = rec.get("course_name", cc)
+        held = rec["classes_held"]
+        att = rec["classes_attended"]
+        pct = round((att / held) * 100, 2) if held > 0 else 0.0
+        
+        if pct >= 75.0:
+            status = "ELIGIBLE"
+            note = "Satisfies minimum 75% threshold (Clause 11.2)"
+        elif pct >= 65.0:
+            status = "CONDITIONALLY ELIGIBLE"
+            note = "Below 75%; eligible with up to 10% Dean relaxation on medical/authorized grounds (Clause 11.3)"
+            overall_eligible = False
+            applied_rules.append({
+                "rule_id": "ATT-RELAX-DEAN",
+                "value": "<=10%",
+                "source_doc_id": "ACAD-REG-2024",
+                "section": "Clause 11.3"
+            })
+        elif pct >= 60.0:
+            status = "CRITICAL SHORTAGE"
+            note = "Requires 5% Committee relaxation (Clause 11.4); high risk of detention"
+            overall_eligible = False
+        else:
+            status = "DETAINED ('FD' Grade)"
+            note = "Below 60% absolute floor (Clause 11.6); detained under Clause 11.7"
+            overall_eligible = False
+            applied_rules.append({
+                "rule_id": "ATT-HARD-FLOOR",
+                "value": ">=60%",
+                "source_doc_id": "ACAD-REG-2024",
+                "section": "Clause 11.6"
+            })
+            
+        courses_summary.append({
+            "course_code": cc,
+            "course_name": name,
+            "classes_held": held,
+            "classes_attended": att,
+            "attendance_pct": pct,
+            "status": status,
+            "note": note
+        })
+        lines.append(f"• **{cc} ({name}):** {att}/{held} classes attended (**{pct}%**) — **{status}**\n  _{note}_")
+        
+    student = get_student(student_id)
+    student_name = student["full_name"] if student else student_id
+    prog = student["programme"] if student else ""
+    
+    summary_text = (
+        f"Here is your attendance record, **{student_name}** ({student_id} - {prog}):\n\n" +
+        "\n\n".join(lines) + "\n\n" +
+        ("✅ **Overall Assessment:** You meet the 75% attendance requirement in all registered courses and are **ELIGIBLE** to appear in the examinations."
+         if overall_eligible else
+         "⚠️ **Overall Assessment:** Attendance shortage detected in one or more courses. Please review university condonation guidelines under Clause 11.3 or contact your HoD immediately.")
+    )
+    
+    return {
+        "status": "success",
+        "student_id": student_id,
+        "courses": courses_summary,
+        "applied_rules": applied_rules,
+        "explanation": summary_text
     }
 
 def check_supplementary_eligibility_tool(student_id: str, course_code: str, as_of_date: str = "2026-10-06") -> Dict[str, Any]:
