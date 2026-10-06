@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  assistant:
+    build: .
+    container_name: nsut_student_assistant
+    ports:
+      - "8000:8000"
+      - "8501:8501"
+    environment:
+      - API_BASE_URL=http://localhost:8000
+      - MOCK_LLM=true
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
