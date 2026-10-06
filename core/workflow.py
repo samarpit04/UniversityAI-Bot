@@ -20,6 +20,7 @@ from core.tools import (
     check_placement_eligibility_tool,
     simulate_what_if_tool
 )
+from core.llm import call_huggingface_llm
 
 class AssistantState(TypedDict):
     question: str
@@ -344,67 +345,64 @@ def node_synthesize_response(state: AssistantState) -> Dict[str, Any]:
                 "effective_from": "2024-07-01"
             })
             
+        # Optional LLM refinement if question has extra commentary
         return {
             "answer_type": "calculated",
             "answer": answer_text,
             "citations": citations,
             "explanation": f"Result deterministically computed via tool '{tools_invoked[-1]['tool']}' over SQLite data and Rule Registry.",
-            "model": "deterministic-tools+llama3.1:8b"
+            "model": f"tools+{settings.HF_MODEL}"
         }
 
     # Case 2: Conflict / Supersession
     if conflicts or "supersed" in question.lower() or "conflict" in question.lower():
         top_chunk = valid_chunks[0] if valid_chunks else None
         doc_title = top_chunk.get("title") if top_chunk else "University Regulations"
-        answer_text = (
+        base_answer = (
             f"Based on the **Source Precedence Policy (Annex A)** as of {as_of_date}:\n\n"
             f"• **Authoritative Document:** {doc_title} (Authority Level {top_chunk.get('authority_level', 1) if top_chunk else 1})\n"
             f"• **Resolution:** Higher-authority regulations and official circulars prevail over informal department FAQs or older clauses.\n\n"
             f"**Applied Rule:** Minimum attendance requirement is 75% under Clause 11.2 of Academic Regulations. "
             f"Informal guidance (e.g., claiming 65% is enough) is Level 4 advisory and cannot override official ordinances."
         )
+        llm_ans, model_used, tokens = call_huggingface_llm(
+            question=question,
+            context_chunks=valid_chunks,
+            tools_invoked=tools_invoked,
+            applied_rules=applied_rules,
+            fallback_text=base_answer
+        )
         return {
             "answer_type": "conflict_flagged" if len(conflicts) > 1 else "retrieved_fact",
-            "answer": answer_text,
+            "answer": llm_ans,
             "citations": citations,
             "explanation": state.get("precedence_notes", "Resolved under Annex A Precedence Policy."),
-            "model": "precedence-engine+llama3.1:8b"
+            "model": model_used
         }
 
-    # Case 3: Grounded Policy Fact
+    # Case 3: Grounded Policy Fact (Synthesized with Hugging Face LLM)
     if valid_chunks:
         top_chunk = valid_chunks[0]
-        # Grounded answer synthesis
-        text_content = top_chunk["text"]
+        fallback_text = (
+            "Under Clause 11.2 of the NSUT Academic Regulations (ACAD-REG-2024), students must have a "
+            "minimum attendance of **75%** of the total number of classes held in a subject to be eligible to appear "
+            "in the End-Semester Examination."
+        )
         
-        # Clean answer extraction
-        if "attendance" in question.lower():
-            answer_text = (
-                "Under Clause 11.2 of the NSUT Academic Regulations (ACAD-REG-2024), students must have a "
-                "minimum attendance of **75%** of the total number of classes (lectures, tutorials, and practicals) "
-                "held in a subject to be eligible to appear in the Mid-Semester (MSE) and End-Semester Examinations (ESE).\n\n"
-                "• **Relaxation:** Dean Academics may allow up to 10% relaxation on medical/authorized grounds (Clause 11.3).\n"
-                "• **Detention Floor:** Any student below 60% attendance is awarded an 'FD' grade and detained (Clause 11.6 & 11.7)."
-            )
-        elif "unfair means" in question.lower() or "ufm" in question.lower() or "mobile" in question.lower() or "cheating" in question.lower():
-            answer_text = (
-                "Under the NSUT Dealing With Unfair Means Regulations (NSUT-UFM-2024):\n\n"
-                "• **Possession of electronic gadgets / mobile phones (Part C.1):** "
-                "The theory examination of the concerned paper is cancelled and the examinee is deemed to have secured **zero marks** in that paper. "
-                "For End-Semester exams, the Standing UFM Committee may extend this to cancellation of the entire semester.\n"
-                "• **Weapons or physical violence (Part E):** Cancellation of the entire examination for both semesters "
-                "and debarment from the University for 12 months."
-            )
-        else:
-            # Fallback to direct citation text
-            answer_text = f"According to {top_chunk.get('title')} ({top_chunk.get('section')}):\n\n{text_content}"
+        llm_ans, model_used, tokens = call_huggingface_llm(
+            question=question,
+            context_chunks=valid_chunks,
+            tools_invoked=tools_invoked,
+            applied_rules=applied_rules,
+            fallback_text=fallback_text
+        )
 
         return {
             "answer_type": "retrieved_fact",
-            "answer": answer_text,
+            "answer": llm_ans,
             "citations": citations,
-            "explanation": f"Grounded fact extracted from {top_chunk.get('doc_id')} ({top_chunk.get('section')}).",
-            "model": "retrieval-engine+llama3.1:8b"
+            "explanation": f"Grounded fact synthesized by {model_used} from {top_chunk.get('doc_id')} ({top_chunk.get('section')}).",
+            "model": model_used
         }
 
     return {

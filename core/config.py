@@ -14,7 +14,10 @@ class Settings(BaseSettings):
     DOCS_DIR: str = str(BASE_DIR / "data" / "university_docs")
     
     # LLM Settings
-    MOCK_LLM: bool = True  # Default to deterministic grounded mock or local Ollama when available
+    HUGGINGFACE_ACCESS_TOKEN: str = os.getenv("HUGGINGFACE_ACCESS_TOKEN", "")
+    HF_MODEL: str = os.getenv("HF_MODEL", "meta-llama/Llama-3.1-8B-Instruct")
+    MOCK_LLM: bool = False
+    
     OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
     OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
     

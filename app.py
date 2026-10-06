@@ -114,6 +114,8 @@ st.sidebar.divider()
 as_of_date_val = st.sidebar.date_input("As-Of Date (Annex A)", datetime(2026, 10, 6))
 as_of_date_str = as_of_date_val.strftime("%Y-%m-%d")
 
+st.sidebar.markdown(f"**⚡ Active LLM:** `{settings.HF_MODEL}`")
+
 if st.sidebar.button("🧹 Clear Chat History"):
     st.session_state.messages = []
     st.rerun()

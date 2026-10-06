@@ -148,7 +148,12 @@ async def health_check():
     col = get_collection()
     v_status = f"ready ({col.count()} chunks)" if col else "error"
     
-    llm_status = "mock/grounded_deterministic (Ollama fallback)" if settings.MOCK_LLM else f"ollama ({settings.OLLAMA_MODEL})"
+    if settings.HUGGINGFACE_ACCESS_TOKEN:
+        llm_status = f"HuggingFace ({settings.HF_MODEL})"
+    elif not settings.MOCK_LLM:
+        llm_status = f"ollama ({settings.OLLAMA_MODEL})"
+    else:
+        llm_status = "mock/grounded_deterministic (Ollama fallback)"
     
     return HealthResponse(
         status="healthy",
